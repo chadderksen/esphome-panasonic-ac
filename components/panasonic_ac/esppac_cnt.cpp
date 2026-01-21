@@ -255,17 +255,17 @@ void PanasonicACCNT::control(const climate::ClimateCall &call) {
 
     auto fanMode = call.get_custom_fan_mode();
 
-    if (strcmp(fanMode, "Automatic") == 0)
+    if (fanMode == "Automatic") == 0)
       this->cmd[3] = 0xA0;
-    else if (strcmp(fanMode, "1") == 0)
+    else if (fanMode == "1") == 0)
       this->cmd[3] = 0x30;
-    else if (strcmp(fanMode, "2") == 0)
+    else if (fanMode == "2") == 0)
       this->cmd[3] = 0x40;
-    else if (strcmp(fanMode, "3") == 0)
+    else if (fanMode == "3") == 0)
       this->cmd[3] = 0x50;
-    else if (strcmp(fanMode, "4") == 0)
+    else if (fanMode == "4") == 0)
       this->cmd[3] = 0x60;
-    else if (strcmp(fanMode, "5") == 0)
+    else if (fanMode == "5") == 0)
       this->cmd[3] = 0x70;
     else
       ESP_LOGV(TAG, "Unsupported fan mode requested");
