@@ -112,22 +112,22 @@ void PanasonicACWLAN::control(const climate::ClimateCall &call) {
 
     auto fanMode = call.get_custom_fan_mode();
 
-    if (strcmp(fanMode, "Automatic") == 0) {
+    if (fanMode == "Automatic") == 0) {
       set_value(0xB2, 0x41);
       set_value(0xA0, 0x41);
-    } else if (strcmp(fanMode, "1") == 0) {
+    } else if (fanMode == "1") == 0) {
       set_value(0xB2, 0x41);
       set_value(0xA0, 0x32);
-    } else if (strcmp(fanMode, "2") == 0) {
+    } else if (fanMode == "2") == 0) {
       set_value(0xB2, 0x41);
       set_value(0xA0, 0x33);
-    } else if (strcmp(fanMode, "3") == 0) {
+    } else if (fanMode == "3") == 0) {
       set_value(0xB2, 0x41);
       set_value(0xA0, 0x34);
-    } else if (strcmp(fanMode, "4") == 0) {
+    } else if (fanMode == "4") == 0) {
       set_value(0xB2, 0x41);
       set_value(0xA0, 0x35);
-    } else if (strcmp(fanMode, "5") == 0) {
+    } else if (fanMode == "5") == 0) {
       set_value(0xB2, 0x41);
       set_value(0xA0, 0x36);
     } else
@@ -166,15 +166,15 @@ void PanasonicACWLAN::control(const climate::ClimateCall &call) {
 
     auto preset = call.get_custom_preset();
 
-    if (strcmp(preset, "Normal") == 0) {
+    if (preset == "Normal") == 0) {
       set_value(0xB2, 0x41);
       set_value(0x35, 0x42);
       set_value(0x34, 0x42);
-    } else if (strcmp(preset, "Powerful") == 0) {
+    } else if (preset == "Powerful") == 0) {
       set_value(0xB2, 0x42);
       set_value(0x35, 0x42);
       set_value(0x34, 0x42);
-    } else if (strcmp(preset, "Quiet") == 0) {
+    } else if (preset == "Quiet") == 0) {
       set_value(0xB2, 0x43);
       set_value(0x35, 0x42);
       set_value(0x34, 0x42);
