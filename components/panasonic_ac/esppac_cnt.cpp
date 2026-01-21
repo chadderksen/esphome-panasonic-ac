@@ -198,11 +198,9 @@ void PanasonicACCNT::loop() {
   handle_cmd();
   handle_poll();  // Handle sending poll packets
 }
-
 /*
  * ESPHome control request
  */
-
 void PanasonicACCNT::control(const climate::ClimateCall &call) {
   if (this->state_ != ACState::Ready)
     return;
@@ -241,19 +239,22 @@ void PanasonicACCNT::control(const climate::ClimateCall &call) {
   }
 
   if (call.get_target_temperature().has_value()) {
-    ESP_LOGV(TAG, "Requested target temp change to %.2f, %.2f including offset", *call.get_target_temperature(), *call.get_target_temperature() - this->current_temperature_offset_);
+    ESP_LOGV(TAG, "Requested target temp change to %.2f, %.2f including offset",
+             *call.get_target_temperature(),
+             *call.get_target_temperature() - this->current_temperature_offset_);
     this->cmd[1] = (*call.get_target_temperature() - this->current_temperature_offset_) / TEMPERATURE_STEP;
   }
 
   if (call.has_custom_fan_mode()) {
     ESP_LOGV(TAG, "Requested fan mode change");
 
+    // StringRef → const char*
+    const char *fanMode = call.get_custom_fan_mode().value().c_str();
+
     if (strcmp(this->get_custom_preset(), "Normal") != 0) {
       ESP_LOGV(TAG, "Resetting preset");
       this->cmd[5] = (this->cmd[5] & 0xF0);  // Clear right nib for normal mode
     }
-
-    const char *fanMode = call.get_custom_fan_mode();
 
     if (strcmp(fanMode, "Automatic") == 0)
       this->cmd[3] = 0xA0;
@@ -296,7 +297,8 @@ void PanasonicACCNT::control(const climate::ClimateCall &call) {
   if (call.has_custom_preset()) {
     ESP_LOGV(TAG, "Requested preset change");
 
-    const char *preset = call.get_custom_preset();
+    // StringRef → const char*
+    const char *preset = call.get_custom_preset().value().c_str();
 
     if (strcmp(preset, "Normal") == 0)
       this->cmd[5] = (this->cmd[5] & 0xF0);  // Clear right nib for normal mode
@@ -405,11 +407,9 @@ void PanasonicACCNT::send_packet(const std::vector<uint8_t> &packet, CommandType
   write_array(packet);       // Write to UART
   log_packet(packet, true);  // Write to log
 }
-
 /*
  * Loop handling
  */
-
 void PanasonicACCNT::handle_poll() {
   if (millis() - this->last_packet_sent_ > POLL_INTERVAL) {
     ESP_LOGV(TAG, "Polling AC");
@@ -428,41 +428,32 @@ void PanasonicACCNT::handle_cmd() {
 /*
  * Packet handling
  */
-
 bool PanasonicACCNT::verify_packet() {
   if (this->rx_buffer_.size() < 12) {
     ESP_LOGW(TAG, "Dropping invalid packet (length)");
-
-    this->rx_buffer_.clear();  // Reset buffer
+    this->rx_buffer_.clear();
     return false;
   }
 
-  // Check if header matches
   if (this->rx_buffer_[0] != CTRL_HEADER && this->rx_buffer_[0] != POLL_HEADER) {
     ESP_LOGW(TAG, "Dropping invalid packet (header)");
-
-    this->rx_buffer_.clear();  // Reset buffer
+    this->rx_buffer_.clear();
     return false;
   }
 
-  // Packet length minus header, packet length and checksum
   if (this->rx_buffer_[1] != this->rx_buffer_.size() - 3) {
     ESP_LOGD(TAG, "Dropping invalid packet (length mismatch)");
-
-    this->rx_buffer_.clear();  // Reset buffer
+    this->rx_buffer_.clear();
     return false;
   }
 
   uint8_t checksum = 0;
-
-  for (uint8_t b : this->rx_buffer_) {
+  for (uint8_t b : this->rx_buffer_)
     checksum += b;
-  }
 
   if (checksum != 0) {
     ESP_LOGD(TAG, "Dropping invalid packet (checksum)");
-
-    this->rx_buffer_.clear();  // Reset buffer
+    this->rx_buffer_.clear();
     return false;
   }
 
@@ -477,7 +468,7 @@ void PanasonicACCNT::handle_packet() {
     this->publish_state();
 
     if (this->state_ != ACState::Ready)
-      this->state_ = ACState::Ready;  // Mark as ready after first poll
+      this->state_ = ACState::Ready;
   } else {
     ESP_LOGD(TAG, "Received unknown packet");
   }
@@ -486,17 +477,12 @@ void PanasonicACCNT::handle_packet() {
 /*
  * Sensor handling
  */
-
 void PanasonicACCNT::on_vertical_swing_change(const std::string &swing) {
   if (this->state_ != ACState::Ready)
     return;
 
-  ESP_LOGD(TAG, "Setting vertical swing position");
-
-  if (this->cmd.empty()) {
-    ESP_LOGV(TAG, "Copying data to cmd");
+  if (this->cmd.empty())
     this->cmd = this->data;
-  }
 
   if (swing == "down")
     this->cmd[4] = (this->cmd[4] & 0x0F) + 0x50;
@@ -522,12 +508,8 @@ void PanasonicACCNT::on_horizontal_swing_change(const std::string &swing) {
   if (this->state_ != ACState::Ready)
     return;
 
-  ESP_LOGD(TAG, "Setting horizontal swing position");
-
-  if (this->cmd.empty()) {
-    ESP_LOGV(TAG, "Copying data to cmd");
+  if (this->cmd.empty())
     this->cmd = this->data;
-  }
 
   if (swing == "left")
     this->cmd[4] = (this->cmd[4] & 0xF0) + 0x09;
@@ -551,82 +533,42 @@ void PanasonicACCNT::on_nanoex_change(bool state) {
   if (this->state_ != ACState::Ready)
     return;
 
-  if (this->cmd.empty()) {
-    ESP_LOGV(TAG, "Copying data to cmd");
+  if (this->cmd.empty())
     this->cmd = this->data;
-  }
 
   this->nanoex_state_ = state;
-
-  if (state) {
-    ESP_LOGV(TAG, "Turning nanoex on");
-    this->cmd[5] = (this->cmd[5] & 0x0F) + 0x40;
-  } else {
-    ESP_LOGV(TAG, "Turning nanoex off");
-    this->cmd[5] = (this->cmd[5] & 0x0F);
-  }
+  this->cmd[5] = state ? (this->cmd[5] & 0x0F) + 0x40 : (this->cmd[5] & 0x0F);
 }
 
 void PanasonicACCNT::on_eco_change(bool state) {
   if (this->state_ != ACState::Ready)
     return;
 
-  if (this->cmd.empty()) {
-    ESP_LOGV(TAG, "Copying data to cmd");
+  if (this->cmd.empty())
     this->cmd = this->data;
-  }
 
   this->eco_state_ = state;
-
-  if (state) {
-    ESP_LOGV(TAG, "Turning eco mode on");
-    this->cmd[8] = 0x40;
-  } else {
-    ESP_LOGV(TAG, "Turning eco mode off");
-    this->cmd[8] = 0x00;
-  }
+  this->cmd[8] = state ? 0x40 : 0x00;
 }
 
 void PanasonicACCNT::on_econavi_change(bool state) {
   if (this->state_ != ACState::Ready)
     return;
 
-  if (this->cmd.empty()) {
-    ESP_LOGV(TAG, "Copying data to cmd");
+  if (this->cmd.empty())
     this->cmd = this->data;
-  }
 
   this->econavi_state_ = state;
-
-  if (state) {
-    ESP_LOGV(TAG, "Turning econavi mode on");
-    this->cmd[5] = 0x10;
-  } else {
-    ESP_LOGV(TAG, "Turning econavi mode off");
-    this->cmd[5] = 0x00;
-  }
+  this->cmd[5] = state ? 0x10 : 0x00;
 }
 
 void PanasonicACCNT::on_mild_dry_change(bool state) {
   if (this->state_ != ACState::Ready)
     return;
 
-  if (this->cmd.empty()) {
-    ESP_LOGV(TAG, "Copying data to cmd");
+  if (this->cmd.empty())
     this->cmd = this->data;
-  }
 
   this->mild_dry_state_ = state;
-
-  if (state) {
-    ESP_LOGV(TAG, "Turning mild dry on");
-    this->cmd[2] = 0x7F;
-  } else {
-    ESP_LOGV(TAG, "Turning mild dry off");
-    this->cmd[2] = 0x80;
-  }
+  this->cmd[2] = state ? 0x7F : 0x80;
 }
-
-}  // namespace CNT
-}  // namespace panasonic_ac
-}  // namespace esphome
