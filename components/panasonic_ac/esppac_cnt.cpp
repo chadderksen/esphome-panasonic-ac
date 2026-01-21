@@ -168,35 +168,33 @@ static bool determine_mild_dry(uint8_t value) {
 }
 
 uint16_t determine_power_consumption(uint8_t byte_28, uint8_t byte_29, uint8_t offset) {
-  return (uint16_t) (byte_28 + (byte_29 * 256)) - offset;
+  return (uint16_t)(byte_28 + (byte_29 * 256)) - offset;
 }
 
 void PanasonicACCNT::setup() {
   PanasonicAC::setup();
-
   ESP_LOGD(TAG, "Using CZ-TACG1 protocol via CN-CNT");
 }
 
 void PanasonicACCNT::loop() {
   PanasonicAC::read_data();
 
-  if (millis() - this->last_read_ > READ_TIMEOUT &&
-      !this->rx_buffer_.empty())  // Check if our read timed out and we received something
-  {
+  if (millis() - this->last_read_ > READ_TIMEOUT && !this->rx_buffer_.empty()) {
     log_packet(this->rx_buffer_);
 
-    if (!verify_packet())  // Verify length, header, counter and checksum
+    if (!verify_packet())  // Verify length, header and checksum
       return;
 
     this->waiting_for_response_ = false;
-    this->last_packet_received_ = millis();  // Set the time at which we received our last packet
+    this->last_packet_received_ = millis();
 
     handle_packet();
 
-    this->rx_buffer_.clear();  // Reset buffer
+    this->rx_buffer_.clear();
   }
+
   handle_cmd();
-  handle_poll();  // Handle sending poll packets
+  handle_poll();
 }
 
 /*
@@ -241,31 +239,34 @@ void PanasonicACCNT::control(const climate::ClimateCall &call) {
   }
 
   if (call.get_target_temperature().has_value()) {
-    ESP_LOGV(TAG, "Requested target temp change to %.2f, %.2f including offset", *call.get_target_temperature(), *call.get_target_temperature() - this->current_temperature_offset_);
+    ESP_LOGV(TAG, "Requested target temp change to %.2f, %.2f including offset",
+             *call.get_target_temperature(),
+             *call.get_target_temperature() - this->current_temperature_offset_);
     this->cmd[1] = (*call.get_target_temperature() - this->current_temperature_offset_) / TEMPERATURE_STEP;
   }
 
   if (call.has_custom_fan_mode()) {
     ESP_LOGV(TAG, "Requested fan mode change");
 
-    if (this->get_custom_preset() != "Normal") {
+    // ESPHome 2026.x: StringRef -> use c_str() for comparisons
+    if (strcmp(this->get_custom_preset().c_str(), "Normal") != 0) {
       ESP_LOGV(TAG, "Resetting preset");
       this->cmd[5] = (this->cmd[5] & 0xF0);  // Clear right nib for normal mode
     }
 
-    auto fanMode = call.get_custom_fan_mode();
+    const char *fanMode = call.get_custom_fan_mode().c_str();
 
-    if (fanMode == "Automatic") == 0)
+    if (strcmp(fanMode, "Automatic") == 0)
       this->cmd[3] = 0xA0;
-    else if (fanMode == "1") == 0)
+    else if (strcmp(fanMode, "1") == 0)
       this->cmd[3] = 0x30;
-    else if (fanMode == "2") == 0)
+    else if (strcmp(fanMode, "2") == 0)
       this->cmd[3] = 0x40;
-    else if (fanMode == "3") == 0)
+    else if (strcmp(fanMode, "3") == 0)
       this->cmd[3] = 0x50;
-    else if (fanMode == "4") == 0)
+    else if (strcmp(fanMode, "4") == 0)
       this->cmd[3] = 0x60;
-    else if (fanMode == "5") == 0)
+    else if (strcmp(fanMode, "5") == 0)
       this->cmd[3] = 0x70;
     else
       ESP_LOGV(TAG, "Unsupported fan mode requested");
@@ -296,14 +297,14 @@ void PanasonicACCNT::control(const climate::ClimateCall &call) {
   if (call.has_custom_preset()) {
     ESP_LOGV(TAG, "Requested preset change");
 
-    auto preset  = call.get_custom_preset();
+    const char *preset = call.get_custom_preset().c_str();
 
     if (strcmp(preset, "Normal") == 0)
       this->cmd[5] = (this->cmd[5] & 0xF0);  // Clear right nib for normal mode
     else if (strcmp(preset, "Powerful") == 0)
-      this->cmd[5] = (this->cmd[5] & 0xF0) + 0x02;  // Clear right nib and set powerful mode
+      this->cmd[5] = (this->cmd[5] & 0xF0) + 0x02;  // Set powerful
     else if (strcmp(preset, "Quiet") == 0)
-      this->cmd[5] = (this->cmd[5] & 0xF0) + 0x04;  // Clear right nib and set quiet mode
+      this->cmd[5] = (this->cmd[5] & 0xF0) + 0x04;  // Set quiet
     else
       ESP_LOGV(TAG, "Unsupported preset requested");
   }
@@ -325,33 +326,33 @@ void PanasonicACCNT::set_data(bool set) {
   bool econavi = determine_econavi(this->data[5]);
   bool mildDry = determine_mild_dry(this->data[2]);
 
-  this->update_target_temperature((int8_t) this->data[1]);
+  this->update_target_temperature((uint8_t)this->data[1]);
 
   if (set) {
     // Also set current and outside temperature
     // 128 means not supported
     if (this->current_temperature_sensor_ == nullptr) {
       if (this->rx_buffer_[18] != 0x80)
-        this->update_current_temperature((int8_t) this->rx_buffer_[18]);
+        this->update_current_temperature((int8_t)this->rx_buffer_[18]);
       else if (this->rx_buffer_[21] != 0x80)
-        this->update_current_temperature((int8_t) this->rx_buffer_[21]);
+        this->update_current_temperature((int8_t)this->rx_buffer_[21]);
       else
         ESP_LOGV(TAG, "Current temperature is not supported");
     }
 
     if (this->outside_temperature_sensor_ != nullptr) {
       if (this->rx_buffer_[19] != 0x80)
-        this->update_outside_temperature((int8_t) this->rx_buffer_[19]);
+        this->update_outside_temperature((int8_t)this->rx_buffer_[19]);
       else if (this->rx_buffer_[22] != 0x80)
-        this->update_outside_temperature((int8_t) this->rx_buffer_[22]);
+        this->update_outside_temperature((int8_t)this->rx_buffer_[22]);
       else
         ESP_LOGV(TAG, "Outside temperature is not supported");
     }
 
     if (this->current_power_consumption_sensor_ != nullptr) {
       uint16_t power_consumption = determine_power_consumption(
-          (int8_t) this->rx_buffer_[28], (int8_t) this->rx_buffer_[29], (int8_t) this->rx_buffer_[30]);
-      this->update_current_power_consumption(power_consumption);
+          (uint8_t)this->rx_buffer_[28], (uint8_t)this->rx_buffer_[29], (uint8_t)this->rx_buffer_[30]);
+      this->update_current_power_consumption((int16_t)power_consumption);
     }
   }
 
@@ -377,33 +378,33 @@ void PanasonicACCNT::set_data(bool set) {
 
 /*
  * Send a command, attaching header, packet length and checksum
+ * NOTE: Do NOT repeat default args here if they exist in the header.
  */
-void PanasonicACCNT::send_command(std::vector<uint8_t> command, CommandType type, uint8_t header = CNT::CTRL_HEADER) {
+void PanasonicACCNT::send_command(std::vector<uint8_t> command, CommandType type, uint8_t header) {
   uint8_t length = command.size();
   command.insert(command.begin(), header);
   command.insert(command.begin() + 1, length);
 
   uint8_t checksum = 0;
-
   for (uint8_t i : command)
-    checksum -= i;  // Add to checksum
+    checksum -= i;
 
   command.push_back(checksum);
 
-  send_packet(command, type);  // Actually send the constructed packet
+  send_packet(command, type);
 }
 
 /*
  * Send a raw packet, as is
  */
 void PanasonicACCNT::send_packet(const std::vector<uint8_t> &packet, CommandType type) {
-  this->last_packet_sent_ = millis();  // Save the time when we sent the last packet
+  this->last_packet_sent_ = millis();
 
-  if (type != CommandType::Response)     // Don't wait for a response for responses
-    this->waiting_for_response_ = true;  // Mark that we are waiting for a response
+  if (type != CommandType::Response)
+    this->waiting_for_response_ = true;
 
-  write_array(packet);       // Write to UART
-  log_packet(packet, true);  // Write to log
+  write_array(packet);
+  log_packet(packet, true);
 }
 
 /*
@@ -432,37 +433,31 @@ void PanasonicACCNT::handle_cmd() {
 bool PanasonicACCNT::verify_packet() {
   if (this->rx_buffer_.size() < 12) {
     ESP_LOGW(TAG, "Dropping invalid packet (length)");
-
-    this->rx_buffer_.clear();  // Reset buffer
+    this->rx_buffer_.clear();
     return false;
   }
 
   // Check if header matches
   if (this->rx_buffer_[0] != CTRL_HEADER && this->rx_buffer_[0] != POLL_HEADER) {
     ESP_LOGW(TAG, "Dropping invalid packet (header)");
-
-    this->rx_buffer_.clear();  // Reset buffer
+    this->rx_buffer_.clear();
     return false;
   }
 
   // Packet length minus header, packet length and checksum
   if (this->rx_buffer_[1] != this->rx_buffer_.size() - 3) {
     ESP_LOGD(TAG, "Dropping invalid packet (length mismatch)");
-
-    this->rx_buffer_.clear();  // Reset buffer
+    this->rx_buffer_.clear();
     return false;
   }
 
   uint8_t checksum = 0;
-
-  for (uint8_t b : this->rx_buffer_) {
+  for (uint8_t b : this->rx_buffer_)
     checksum += b;
-  }
 
   if (checksum != 0) {
     ESP_LOGD(TAG, "Dropping invalid packet (checksum)");
-
-    this->rx_buffer_.clear();  // Reset buffer
+    this->rx_buffer_.clear();
     return false;
   }
 
@@ -477,7 +472,7 @@ void PanasonicACCNT::handle_packet() {
     this->publish_state();
 
     if (this->state_ != ACState::Ready)
-      this->state_ = ACState::Ready;  // Mark as ready after first poll
+      this->state_ = ACState::Ready;
   } else {
     ESP_LOGD(TAG, "Received unknown packet");
   }
