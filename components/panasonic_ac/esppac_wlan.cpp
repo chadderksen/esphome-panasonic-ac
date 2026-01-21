@@ -110,7 +110,7 @@ void PanasonicACWLAN::control(const climate::ClimateCall &call) {
   if (call.has_custom_fan_mode()) {
     ESP_LOGV(TAG, "Requested fan mode change");
 
-    const char *fanMode = call.get_custom_fan_mode();
+    auto fanMode = call.get_custom_fan_mode();
 
     if (strcmp(fanMode, "Automatic") == 0) {
       set_value(0xB2, 0x41);
@@ -164,7 +164,7 @@ void PanasonicACWLAN::control(const climate::ClimateCall &call) {
   if (call.has_custom_preset()) {
     ESP_LOGV(TAG, "Requested preset change");
 
-    const char *preset = call.get_custom_preset();
+    auto preset = call.get_custom_preset();
 
     if (strcmp(preset, "Normal") == 0) {
       set_value(0xB2, 0x41);
