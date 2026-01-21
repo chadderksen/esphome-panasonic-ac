@@ -1,277 +1,134 @@
-#include "esppac_cnt.h"
-#include "esppac_commands_cnt.h"
+#include "esppac_wlan.h"
+#include "esppac_commands_wlan.h"
 
 #include "esphome/core/log.h"
 
 namespace esphome {
 namespace panasonic_ac {
-namespace CNT {
+namespace WLAN {
 
-static const char *const TAG = "panasonic_ac.cz_tacg1";
+static const char *const TAG = "panasonic_ac.dnskp11";
 
-static climate::ClimateMode determine_mode(uint8_t mode) {
-  uint8_t nib1 = (mode >> 4) & 0x0F;  // Left nib for mode
-  uint8_t nib2 = (mode >> 0) & 0x0F;  // Right nib for power state
-
-  if (nib2 == 0x00)
-    return climate::CLIMATE_MODE_OFF;
-
-  switch (nib1) {
-    case 0x00:  // Auto
-      return climate::CLIMATE_MODE_HEAT_COOL;
-    case 0x03:  // Cool
-      return climate::CLIMATE_MODE_COOL;
-    case 0x04:  // Heat
-      return climate::CLIMATE_MODE_HEAT;
-    case 0x02:  // Dry
-      return climate::CLIMATE_MODE_DRY;
-    case 0x06:  // Fan only
-      return climate::CLIMATE_MODE_FAN_ONLY;
-    default:
-      ESP_LOGW(TAG, "Received unknown climate mode");
-      return climate::CLIMATE_MODE_OFF;
-  }
-}
-
-static const char *determine_fan_speed(uint8_t speed) {
-  switch (speed) {
-    case 0xA0:  // Auto
-      return "Automatic";
-    case 0x30:  // 1
-      return "1";
-    case 0x40:  // 2
-      return "2";
-    case 0x50:  // 3
-      return "3";
-    case 0x60:  // 4
-      return "4";
-    case 0x70:  // 5
-      return "5";
-    default:
-      ESP_LOGW(TAG, "Received unknown fan speed");
-      return "Unknown";
-  }
-}
-
-static const char *determine_vertical_swing(uint8_t swing) {
-  uint8_t nib = (swing >> 4) & 0x0F;  // Left nib for vertical swing
-
-  switch (nib) {
-    case 0x0E:
-      return "swing";
-    case 0x0F:
-      return "auto";
-    case 0x01:
-      return "up";
-    case 0x02:
-      return "up_center";
-    case 0x03:
-      return "center";
-    case 0x04:
-      return "down_center";
-    case 0x05:
-      return "down";
-    case 0x00:
-      return "unsupported";
-    default:
-      ESP_LOGW(TAG, "Received unknown vertical swing mode: 0x%02X", nib);
-      return "Unknown";
-  }
-}
-
-static const char *determine_horizontal_swing(uint8_t swing) {
-  uint8_t nib = (swing >> 0) & 0x0F;  // Right nib for horizontal swing
-
-  switch (nib) {
-    case 0x0D:
-      return "auto";
-    case 0x09:
-      return "left";
-    case 0x0A:
-      return "left_center";
-    case 0x06:
-      return "center";
-    case 0x0B:
-      return "right_center";
-    case 0x0C:
-      return "right";
-    case 0x00:
-      return "unsupported";
-    default:
-      ESP_LOGW(TAG, "Received unknown horizontal swing mode");
-      return "Unknown";
-  }
-}
-
-static const char *determine_preset(uint8_t preset) {
-  uint8_t nib = (preset >> 0) & 0x0F;  // Right nib for preset (powerful/quiet)
-
-  switch (nib) {
-    case 0x02:
-      return "Powerful";
-    case 0x04:
-      return "Quiet";
-    case 0x00:
-      return "Normal";
-    default:
-      ESP_LOGW(TAG, "Received unknown preset");
-      return "Normal";
-  }
-}
-
-static bool determine_preset_nanoex(uint8_t preset) {
-  uint8_t nib = (preset >> 4) & 0x04;  // Left nib for nanoex
-
-  if (nib == 0x04)
-    return true;
-  else if (nib == 0x00)
-    return false;
-  else {
-    ESP_LOGW(TAG, "Received unknown nanoex value");
-    return false;
-  }
-}
-
-static bool determine_eco(uint8_t value) {
-  if (value == 0x40)
-    return true;
-  else if (value == 0x00)
-    return false;
-  else {
-    ESP_LOGW(TAG, "Received unknown eco value");
-    return false;
-  }
-}
-
-static bool determine_econavi(uint8_t value) {
-  uint8_t nib = value & 0x10;
-
-  if (nib == 0x10)
-    return true;
-  else if (nib == 0x00)
-    return false;
-  else {
-    ESP_LOGW(TAG, "Received unknown econavi value");
-    return false;
-  }
-}
-
-static bool determine_mild_dry(uint8_t value) {
-  if (value == 0x7F)
-    return true;
-  else if (value == 0x80)
-    return false;
-  else {
-    ESP_LOGW(TAG, "Received unknown mild dry value");
-    return false;
-  }
-}
-
-uint16_t determine_power_consumption(uint8_t byte_28, uint8_t byte_29, uint8_t offset) {
-  return (uint16_t) (byte_28 + (byte_29 * 256)) - offset;
-}
-
-void PanasonicACCNT::setup() {
+void PanasonicACWLAN::setup() {
   PanasonicAC::setup();
 
-  ESP_LOGD(TAG, "Using CZ-TACG1 protocol via CN-CNT");
+  ESP_LOGD(TAG, "Using DNSK-P11 protocol via CN-WLAN");
 }
 
-void PanasonicACCNT::loop() {
-  PanasonicAC::read_data();
+void PanasonicACWLAN::loop() {
+  if (this->state_ != ACState::Ready) {
+    handle_init_packets();  // Handle initialization packets separate from normal packets
 
-  if (millis() - this->last_read_ > READ_TIMEOUT &&
-      !this->rx_buffer_.empty())  // Check if our read timed out and we received something
-  {
+    if (millis() - this->init_time_ > INIT_FAIL_TIMEOUT) {
+      this->state_ = ACState::Failed;
+      mark_failed();
+      return;
+    }
+  }
+
+  if (millis() - this->last_read_ > READ_TIMEOUT && !this->rx_buffer_.empty()) {  // Check if our read timed out and we received something
     log_packet(this->rx_buffer_);
 
     if (!verify_packet())  // Verify length, header, counter and checksum
       return;
 
-    this->waiting_for_response_ = false;
-    this->last_packet_received_ = millis();  // Set the time at which we received our last packet
+    this->waiting_for_response_ = false;         // Set that we are not waiting for a response anymore since we received a valid one
+    this->last_packet_received_ = millis();      // Set the time at which we received our last packet
 
-    handle_packet();
+    if (this->state_ == ACState::Ready || this->state_ == ACState::FirstPoll || this->state_ == ACState::HandshakeEnding) {
+      handle_packet();  // Handle regular packet
+    } else {
+      handle_handshake_packet();  // Not initialized yet, handle handshake packet
+    }
 
     this->rx_buffer_.clear();  // Reset buffer
   }
-  handle_cmd();
-  handle_poll();  // Handle sending poll packets
+
+  PanasonicAC::read_data();
+
+  handle_resend();  // Handle packets that need to be resent
+  handle_poll();    // Handle sending poll packets
 }
 
 /*
  * ESPHome control request
  */
 
-void PanasonicACCNT::control(const climate::ClimateCall &call) {
+void PanasonicACWLAN::control(const climate::ClimateCall &call) {
   if (this->state_ != ACState::Ready)
     return;
-
-  if (this->cmd.empty()) {
-    ESP_LOGV(TAG, "Copying data to cmd");
-    this->cmd = this->data;
-  }
 
   if (call.get_mode().has_value()) {
     ESP_LOGV(TAG, "Requested mode change");
 
     switch (*call.get_mode()) {
       case climate::CLIMATE_MODE_COOL:
-        this->cmd[0] = 0x34;
+        set_value(0xB0, 0x42);
+        set_value(0x80, 0x30);
         break;
       case climate::CLIMATE_MODE_HEAT:
-        this->cmd[0] = 0x44;
+        set_value(0xB0, 0x43);
+        set_value(0x80, 0x30);
         break;
       case climate::CLIMATE_MODE_DRY:
-        this->cmd[0] = 0x24;
+        set_value(0xB0, 0x44);
+        set_value(0x80, 0x30);
         break;
       case climate::CLIMATE_MODE_HEAT_COOL:
-        this->cmd[0] = 0x04;
+        set_value(0xB0, 0x41);
+        set_value(0x80, 0x30);
         break;
       case climate::CLIMATE_MODE_FAN_ONLY:
-        this->cmd[0] = 0x64;
+        set_value(0xB0, 0x45);
+        set_value(0x80, 0x30);
         break;
       case climate::CLIMATE_MODE_OFF:
-        this->cmd[0] = this->cmd[0] & 0xF0;  // Strip right nib to turn AC off
+        set_value(0x80, 0x31);
         break;
       default:
         ESP_LOGV(TAG, "Unsupported mode requested");
         break;
     }
+
+    // Set mode manually since we won't receive a report from the AC if its the same mode again
+    this->mode = *call.get_mode();
+    this->publish_state();  // Send this state, will get updated once next poll is executed
   }
 
   if (call.get_target_temperature().has_value()) {
-    ESP_LOGV(TAG, "Requested target temp change to %.2f, %.2f including offset", *call.get_target_temperature(),
+    ESP_LOGV(TAG, "Requested target temp change to %.2f, %.2f including offset",
+             *call.get_target_temperature(),
              *call.get_target_temperature() - this->current_temperature_offset_);
-    this->cmd[1] = (*call.get_target_temperature() - this->current_temperature_offset_) / TEMPERATURE_STEP;
+    set_value(0x31, (uint8_t) ((*call.get_target_temperature() - this->current_temperature_offset_) * 2));
   }
 
   if (call.has_custom_fan_mode()) {
     ESP_LOGV(TAG, "Requested fan mode change");
 
-    // ESPHome 2026.x: get_custom_preset() returns StringRef
-    if (strcmp(this->get_custom_preset().c_str(), "Normal") != 0) {
-      ESP_LOGV(TAG, "Resetting preset");
-      this->cmd[5] = (this->cmd[5] & 0xF0);  // Clear right nib for normal mode
-    }
-
-    // ESPHome 2026.x: get_custom_fan_mode() returns StringRef
+    // ESPHome 2026.x: returns StringRef
     const char *fanMode = call.get_custom_fan_mode().c_str();
 
-    if (strcmp(fanMode, "Automatic") == 0)
-      this->cmd[3] = 0xA0;
-    else if (strcmp(fanMode, "1") == 0)
-      this->cmd[3] = 0x30;
-    else if (strcmp(fanMode, "2") == 0)
-      this->cmd[3] = 0x40;
-    else if (strcmp(fanMode, "3") == 0)
-      this->cmd[3] = 0x50;
-    else if (strcmp(fanMode, "4") == 0)
-      this->cmd[3] = 0x60;
-    else if (strcmp(fanMode, "5") == 0)
-      this->cmd[3] = 0x70;
-    else
+    if (strcmp(fanMode, "Automatic") == 0) {
+      set_value(0xB2, 0x41);
+      set_value(0xA0, 0x41);
+    } else if (strcmp(fanMode, "1") == 0) {
+      set_value(0xB2, 0x41);
+      set_value(0xA0, 0x32);
+    } else if (strcmp(fanMode, "2") == 0) {
+      set_value(0xB2, 0x41);
+      set_value(0xA0, 0x33);
+    } else if (strcmp(fanMode, "3") == 0) {
+      set_value(0xB2, 0x41);
+      set_value(0xA0, 0x34);
+    } else if (strcmp(fanMode, "4") == 0) {
+      set_value(0xB2, 0x41);
+      set_value(0xA0, 0x35);
+    } else if (strcmp(fanMode, "5") == 0) {
+      set_value(0xB2, 0x41);
+      set_value(0xA0, 0x36);
+    } else {
       ESP_LOGV(TAG, "Unsupported fan mode requested");
+    }
   }
 
   if (call.get_swing_mode().has_value()) {
@@ -279,16 +136,21 @@ void PanasonicACCNT::control(const climate::ClimateCall &call) {
 
     switch (*call.get_swing_mode()) {
       case climate::CLIMATE_SWING_BOTH:
-        this->cmd[4] = 0xFD;
+        set_value(0xA1, 0x41);
         break;
       case climate::CLIMATE_SWING_OFF:
-        this->cmd[4] = 0x36;  // Reset both to center
+        set_value(0xA1, 0x42);
+        set_value(0xA4, 0x43);
+        set_value(0xA5, 0x43);
+        set_value(0x35, 0x42);
         break;
       case climate::CLIMATE_SWING_VERTICAL:
-        this->cmd[4] = 0xF6;  // Swing vertical, horizontal center
+        set_value(0xA1, 0x43);
+        set_value(0xA5, 0x43);
         break;
       case climate::CLIMATE_SWING_HORIZONTAL:
-        this->cmd[4] = 0x3D;  // Swing horizontal, vertical center
+        set_value(0xA1, 0x44);
+        set_value(0xA4, 0x43);
         break;
       default:
         ESP_LOGV(TAG, "Unsupported swing mode requested");
@@ -299,169 +161,103 @@ void PanasonicACCNT::control(const climate::ClimateCall &call) {
   if (call.has_custom_preset()) {
     ESP_LOGV(TAG, "Requested preset change");
 
-    // ESPHome 2026.x: get_custom_preset() returns StringRef
+    // ESPHome 2026.x: returns StringRef
     const char *preset = call.get_custom_preset().c_str();
 
-    if (strcmp(preset, "Normal") == 0)
-      this->cmd[5] = (this->cmd[5] & 0xF0);  // Clear right nib for normal mode
-    else if (strcmp(preset, "Powerful") == 0)
-      this->cmd[5] = (this->cmd[5] & 0xF0) + 0x02;  // Clear right nib and set powerful mode
-    else if (strcmp(preset, "Quiet") == 0)
-      this->cmd[5] = (this->cmd[5] & 0xF0) + 0x04;  // Clear right nib and set quiet mode
-    else
+    if (strcmp(preset, "Normal") == 0) {
+      set_value(0xB2, 0x41);
+      set_value(0x35, 0x42);
+      set_value(0x34, 0x42);
+    } else if (strcmp(preset, "Powerful") == 0) {
+      set_value(0xB2, 0x42);
+      set_value(0x35, 0x42);
+      set_value(0x34, 0x42);
+    } else if (strcmp(preset, "Quiet") == 0) {
+      set_value(0xB2, 0x43);
+      set_value(0x35, 0x42);
+      set_value(0x34, 0x42);
+    } else {
       ESP_LOGV(TAG, "Unsupported preset requested");
-  }
-}
-
-/*
- * Set the data array to the fields
- */
-void PanasonicACCNT::set_data(bool set) {
-  this->mode = determine_mode(this->data[0]);
-  this->set_custom_fan_mode_(determine_fan_speed(this->data[3]));
-
-  std::string verticalSwing = determine_vertical_swing(this->data[4]);
-  std::string horizontalSwing = determine_horizontal_swing(this->data[4]);
-
-  const char *preset = determine_preset(this->data[5]);
-  bool nanoex = determine_preset_nanoex(this->data[5]);
-  bool eco = determine_eco(this->data[8]);
-  bool econavi = determine_econavi(this->data[5]);
-  bool mildDry = determine_mild_dry(this->data[2]);
-
-  this->update_target_temperature((int8_t) this->data[1]);
-
-  if (set) {
-    // Also set current and outside temperature
-    // 128 means not supported
-    if (this->current_temperature_sensor_ == nullptr) {
-      if (this->rx_buffer_[18] != 0x80)
-        this->update_current_temperature((int8_t) this->rx_buffer_[18]);
-      else if (this->rx_buffer_[21] != 0x80)
-        this->update_current_temperature((int8_t) this->rx_buffer_[21]);
-      else
-        ESP_LOGV(TAG, "Current temperature is not supported");
-    }
-
-    if (this->outside_temperature_sensor_ != nullptr) {
-      if (this->rx_buffer_[19] != 0x80)
-        this->update_outside_temperature((int8_t) this->rx_buffer_[19]);
-      else if (this->rx_buffer_[22] != 0x80)
-        this->update_outside_temperature((int8_t) this->rx_buffer_[22]);
-      else
-        ESP_LOGV(TAG, "Outside temperature is not supported");
-    }
-
-    if (this->current_power_consumption_sensor_ != nullptr) {
-      uint16_t power_consumption = determine_power_consumption(
-          (int8_t) this->rx_buffer_[28], (int8_t) this->rx_buffer_[29], (int8_t) this->rx_buffer_[30]);
-      this->update_current_power_consumption(power_consumption);
     }
   }
 
-  if (verticalSwing == "auto" && horizontalSwing == "auto")
-    this->swing_mode = climate::CLIMATE_SWING_BOTH;
-  else if (verticalSwing == "auto")
-    this->swing_mode = climate::CLIMATE_SWING_VERTICAL;
-  else if (horizontalSwing == "auto")
-    this->swing_mode = climate::CLIMATE_SWING_HORIZONTAL;
-  else
-    this->swing_mode = climate::CLIMATE_SWING_OFF;
-
-  this->update_swing_vertical(verticalSwing);
-  this->update_swing_horizontal(horizontalSwing);
-
-  this->set_custom_preset_(preset);
-
-  this->update_nanoex(nanoex);
-  this->update_eco(eco);
-  this->update_econavi(econavi);
-  this->update_mild_dry(mildDry);
-}
-
-/*
- * Send a command, attaching header, packet length and checksum
- */
-void PanasonicACCNT::send_command(std::vector<uint8_t> command, CommandType type, uint8_t header) {
-  uint8_t length = command.size();
-  command.insert(command.begin(), header);
-  command.insert(command.begin() + 1, length);
-
-  uint8_t checksum = 0;
-
-  for (uint8_t i : command)
-    checksum -= i;  // Add to checksum
-
-  command.push_back(checksum);
-
-  send_packet(command, type);  // Actually send the constructed packet
-}
-
-/*
- * Send a raw packet, as is
- */
-void PanasonicACCNT::send_packet(const std::vector<uint8_t> &packet, CommandType type) {
-  this->last_packet_sent_ = millis();  // Save the time when we sent the last packet
-
-  if (type != CommandType::Response)     // Don't wait for a response for responses
-    this->waiting_for_response_ = true;  // Mark that we are waiting for a response
-
-  write_array(packet);       // Write to UART
-  log_packet(packet, true);  // Write to log
+  if (this->set_queue_index_ > 0) {  // Only send packet if any changes need to be made
+    send_set_command();
+  }
 }
 
 /*
  * Loop handling
  */
 
-void PanasonicACCNT::handle_poll() {
-  if (millis() - this->last_packet_sent_ > POLL_INTERVAL) {
+void PanasonicACWLAN::handle_poll() {
+  if (this->state_ == ACState::Ready && millis() - this->last_packet_sent_ > POLL_INTERVAL) {
     ESP_LOGV(TAG, "Polling AC");
-    send_command(CMD_POLL, CommandType::Normal, POLL_HEADER);
+    send_command(CMD_POLL, sizeof(CMD_POLL));
   }
 }
 
-void PanasonicACCNT::handle_cmd() {
-  if (!this->cmd.empty() && millis() - this->last_packet_sent_ > CMD_INTERVAL) {
-    ESP_LOGV(TAG, "Sending Command");
-    send_command(this->cmd, CommandType::Normal, CTRL_HEADER);
-    this->cmd.clear();
+void PanasonicACWLAN::handle_init_packets() {
+  if (this->state_ == ACState::Initializing) {
+    if (millis() - this->init_time_ > INIT_TIMEOUT) {  // Handle handshake initialization
+      ESP_LOGD(TAG, "Starting handshake [1/16]");
+      send_command(CMD_HANDSHAKE_1, sizeof(CMD_HANDSHAKE_1));  // Send first handshake packet, AC won't send a response
+      delay(3);                                               // Add small delay to mimic real wifi adapter
+      send_command(CMD_HANDSHAKE_2, sizeof(CMD_HANDSHAKE_2));  // Send second handshake packet, AC won't send a response
+                                                               // but we will trigger a resend
+
+      this->state_ = ACState::Handshake;  // Update state to handshake started
+    }
+  } else if (this->state_ == ACState::FirstPoll && millis() - this->last_packet_sent_ > FIRST_POLL_TIMEOUT) {  // Handle sending first poll
+    ESP_LOGD(TAG, "Polling for the first time");
+    send_command(CMD_POLL, sizeof(CMD_POLL));
+
+    this->state_ = ACState::HandshakeEnding;
+  } else if (this->state_ == ACState::HandshakeEnding && millis() - this->last_packet_sent_ > INIT_END_TIMEOUT) {  // Handle last handshake message
+    ESP_LOGD(TAG, "Finishing handshake [16/16]");
+    send_command(CMD_HANDSHAKE_16, sizeof(CMD_HANDSHAKE_16));
+
+    // State is set to ready in the response to this packet
   }
 }
 
-/*
- * Packet handling
- */
-
-bool PanasonicACCNT::verify_packet() {
-  if (this->rx_buffer_.size() < 12) {
+bool PanasonicACWLAN::verify_packet() {
+  if (this->rx_buffer_.size() < 5) {  // Drop packets that are too short
     ESP_LOGW(TAG, "Dropping invalid packet (length)");
-
     this->rx_buffer_.clear();  // Reset buffer
     return false;
   }
 
-  // Check if header matches
-  if (this->rx_buffer_[0] != CTRL_HEADER && this->rx_buffer_[0] != POLL_HEADER) {
+  if (this->rx_buffer_[0] == 0x66) {  // Sync packets are the only packet not starting with 0x5A
+    ESP_LOGI(TAG, "Received sync packet, triggering initialization");
+    this->init_time_ -= INIT_TIMEOUT;  // Set init time back to trigger a initialization now
+    this->rx_buffer_.clear();          // Reset buffer
+    return false;
+  }
+
+  if (this->rx_buffer_[0] != HEADER) {  // Check if header matches
     ESP_LOGW(TAG, "Dropping invalid packet (header)");
-
     this->rx_buffer_.clear();  // Reset buffer
     return false;
   }
 
-  // Packet length minus header, packet length and checksum
-  if (this->rx_buffer_[1] != this->rx_buffer_.size() - 3) {
-    ESP_LOGD(TAG, "Dropping invalid packet (length mismatch)");
-
-    this->rx_buffer_.clear();  // Reset buffer
-    return false;
+  // Counter correction
+  if (this->state_ == ACState::Ready && this->waiting_for_response_) {  // If we were waiting for a response, check if the tx counter matches
+    if (this->rx_buffer_[1] != (uint8_t) (this->transmit_packet_count_ - 1) && this->rx_buffer_[1] != 0xFE) {
+      ESP_LOGW(TAG, "Correcting shifted tx counter");
+      this->receive_packet_count_ = this->rx_buffer_[1];
+    }
+  } else if (this->state_ == ACState::Ready) {  // If not waiting for a response, check rx counter matches
+    if (this->rx_buffer_[1] != this->receive_packet_count_) {
+      ESP_LOGW(TAG, "Correcting shifted rx counter");
+      this->receive_packet_count_ = this->rx_buffer_[1];
+    }
   }
 
   uint8_t checksum = 0;
 
-  for (uint8_t b : this->rx_buffer_) {
-    checksum += b;
-  }
+  for (uint8_t i : this->rx_buffer_)
+    checksum += i;
 
   if (checksum != 0) {
     ESP_LOGD(TAG, "Dropping invalid packet (checksum)");
@@ -473,164 +269,523 @@ bool PanasonicACCNT::verify_packet() {
   return true;
 }
 
-void PanasonicACCNT::handle_packet() {
-  if (this->rx_buffer_[0] == POLL_HEADER) {
-    this->data = std::vector<uint8_t>(this->rx_buffer_.begin() + 2, this->rx_buffer_.begin() + 12);
+/*
+ * Field handling
+ */
 
-    this->set_data(true);
+static climate::ClimateMode determine_mode(uint8_t mode) {
+  switch (mode) {
+    case 0x41:  // Auto
+      return climate::CLIMATE_MODE_HEAT_COOL;
+    case 0x42:  // Cool
+      return climate::CLIMATE_MODE_COOL;
+    case 0x43:  // Heat
+      return climate::CLIMATE_MODE_HEAT;
+    case 0x44:  // Dry
+      return climate::CLIMATE_MODE_DRY;
+    case 0x45:  // Fan only
+      return climate::CLIMATE_MODE_FAN_ONLY;
+    default:
+      ESP_LOGW(TAG, "Received unknown climate mode");
+      return climate::CLIMATE_MODE_OFF;
+  }
+}
+
+static const char *determine_fan_speed(uint8_t speed) {
+  switch (speed) {
+    case 0x32:  // 1
+      return "1";
+    case 0x33:  // 2
+      return "2";
+    case 0x34:  // 3
+      return "3";
+    case 0x35:  // 4
+      return "4";
+    case 0x36:  // 5
+      return "5";
+    case 0x41:  // Auto
+      return "Automatic";
+    default:
+      ESP_LOGW(TAG, "Received unknown fan speed");
+      return "Unknown";
+  }
+}
+
+static const char *determine_preset(uint8_t preset) {
+  switch (preset) {
+    case 0x43:  // Quiet
+      return "Quiet";
+    case 0x42:  // Powerful
+      return "Powerful";
+    case 0x41:  // Normal
+      return "Normal";
+    default:
+      ESP_LOGW(TAG, "Received unknown preset");
+      return "Normal";
+  }
+}
+
+static const char *determine_swing_vertical(uint8_t swing) {
+  switch (swing) {
+    case 0x42:  // Down
+      return "down";
+    case 0x45:  // Down center
+      return "down_center";
+    case 0x43:  // Center
+      return "center";
+    case 0x44:  // Up Center
+      return "up_center";
+    case 0x41:  // Up
+      return "up";
+    default:
+      ESP_LOGW(TAG, "Received unknown vertical swing position");
+      return "Unknown";
+  }
+}
+
+static const char *determine_swing_horizontal(uint8_t swing) {
+  switch (swing) {
+    case 0x42:  // Left
+      return "left";
+    case 0x5C:  // Left center
+      return "left_center";
+    case 0x43:  // Center
+      return "center";
+    case 0x56:  // Right center
+      return "right_center";
+    case 0x41:  // Right
+      return "right";
+    default:
+      ESP_LOGW(TAG, "Received unknown horizontal swing position");
+      return "Unknown";
+  }
+}
+
+static climate::ClimateSwingMode determine_swing(uint8_t swing) {
+  switch (swing) {
+    case 0x41:  // Both
+      return climate::CLIMATE_SWING_BOTH;
+    case 0x42:  // Off
+      return climate::CLIMATE_SWING_OFF;
+    case 0x43:  // Vertical
+      return climate::CLIMATE_SWING_VERTICAL;
+    case 0x44:  // Horizontal
+      return climate::CLIMATE_SWING_HORIZONTAL;
+    default:
+      ESP_LOGW(TAG, "Received unknown swing mode");
+      return climate::CLIMATE_SWING_OFF;
+  }
+}
+
+static constexpr bool determine_nanoex(uint8_t nanoex) {
+  switch (nanoex) {
+    case 0x42:
+      return false;
+    default:
+      return true;
+  }
+}
+
+/*
+ * Packet handling
+ */
+
+void PanasonicACWLAN::handle_packet() {
+  if (this->rx_buffer_[2] == 0x01 && this->rx_buffer_[3] == 0x01) {  // Ping
+    ESP_LOGD(TAG, "Answering ping");
+    send_command(CMD_PING, sizeof(CMD_PING), CommandType::Response);
+
+  } else if (this->rx_buffer_[2] == 0x10 && this->rx_buffer_[3] == 0x89) {  // Received query response
+    ESP_LOGD(TAG, "Received query response");
+
+    if (this->rx_buffer_.size() != 125) {
+      ESP_LOGW(TAG, "Received invalid query response");
+      return;
+    }
+
+    if (this->rx_buffer_[14] == 0x31)
+      this->mode = climate::CLIMATE_MODE_OFF;
+    else
+      this->mode = determine_mode(this->rx_buffer_[18]);
+
+    update_target_temperature((int8_t) this->rx_buffer_[22]);
+    update_current_temperature((int8_t) this->rx_buffer_[62]);
+    update_outside_temperature((int8_t) this->rx_buffer_[66]);
+
+    std::string horizontalSwing = determine_swing_horizontal(this->rx_buffer_[34]);
+    std::string verticalSwing = determine_swing_vertical(this->rx_buffer_[38]);
+
+    update_swing_horizontal(horizontalSwing);
+    update_swing_vertical(verticalSwing);
+
+    bool nanoex = determine_nanoex(this->rx_buffer_[50]);
+    update_nanoex(nanoex);
+
+    this->set_custom_fan_mode_(determine_fan_speed(this->rx_buffer_[26]));
+    this->set_custom_preset_(determine_preset(this->rx_buffer_[42]));
+
+    this->swing_mode = determine_swing(this->rx_buffer_[30]);
+
     this->publish_state();
 
-    if (this->state_ != ACState::Ready)
-      this->state_ = ACState::Ready;  // Mark as ready after first poll
+  } else if (this->rx_buffer_[2] == 0x10 && this->rx_buffer_[3] == 0x88) {  // Command ack
+    ESP_LOGV(TAG, "Received command ack");
+
+  } else if (this->rx_buffer_[2] == 0x10 && this->rx_buffer_[3] == 0x0A) {  // Report
+    ESP_LOGV(TAG, "Received report");
+    send_command(CMD_REPORT_ACK, sizeof(CMD_REPORT_ACK), CommandType::Response);
+
+    if (this->rx_buffer_.size() < 13) {
+      ESP_LOGE(TAG, "Report is too short to handle");
+      return;
+    }
+
+    for (int i = 0; i < this->rx_buffer_[10]; i++) {
+      int currentIndex = (4 * 3) + (i * 4);
+
+      switch (this->rx_buffer_[currentIndex]) {
+        case 0x80:  // Power mode
+          switch (this->rx_buffer_[currentIndex + 2]) {
+            case 0x30:
+              ESP_LOGV(TAG, "Received power mode on");
+              break;
+            case 0x31:
+              ESP_LOGV(TAG, "Received power mode off");
+              this->mode = climate::CLIMATE_MODE_OFF;
+              break;
+            default:
+              ESP_LOGW(TAG, "Received unknown power mode");
+              break;
+          }
+          break;
+
+        case 0xB0:  // Mode
+          this->mode = determine_mode(this->rx_buffer_[currentIndex + 2]);
+          break;
+
+        case 0x31:  // Target temperature
+          ESP_LOGV(TAG, "Received target temperature");
+          update_target_temperature((int8_t) this->rx_buffer_[currentIndex + 2]);
+          break;
+
+        case 0xA0:  // Fan speed
+          ESP_LOGV(TAG, "Received fan speed");
+          this->set_custom_fan_mode_(determine_fan_speed(this->rx_buffer_[currentIndex + 2]));
+          break;
+
+        case 0xB2:  // Preset
+          ESP_LOGV(TAG, "Received preset");
+          this->set_custom_preset_(determine_preset(this->rx_buffer_[currentIndex + 2]));
+          break;
+
+        case 0xA1:
+          ESP_LOGV(TAG, "Received swing mode");
+          this->swing_mode = determine_swing(this->rx_buffer_[currentIndex + 2]);
+          break;
+
+        case 0xA5:  // Horizontal swing position
+          ESP_LOGV(TAG, "Received horizontal swing position");
+          update_swing_horizontal(determine_swing_horizontal(this->rx_buffer_[currentIndex + 2]));
+          break;
+
+        case 0xA4:  // Vertical swing position
+          ESP_LOGV(TAG, "Received vertical swing position");
+          update_swing_vertical(determine_swing_vertical(this->rx_buffer_[currentIndex + 2]));
+          break;
+
+        case 0x33:  // nanoex mode
+          ESP_LOGV(TAG, "Received nanoex state");
+          update_nanoex(determine_nanoex(this->rx_buffer_[currentIndex + 2]));
+          break;
+
+        case 0x20:
+          ESP_LOGV(TAG, "Received unknown nanoex field");
+          break;
+
+        default:
+          ESP_LOGW(TAG, "Report has unknown field");
+          break;
+      }
+    }
+
+    climate::ClimateAction action = determine_action();
+    this->action = action;
+
+    this->publish_state();
+
+  } else if (this->rx_buffer_[2] == 0x01 && this->rx_buffer_[3] == 0x80) {  // Answer for handshake 16
+    ESP_LOGI(TAG, "Panasonic AC component v%s initialized", VERSION);
+    this->state_ = ACState::Ready;
+
   } else {
-    ESP_LOGD(TAG, "Received unknown packet");
+    ESP_LOGW(TAG, "Received unknown packet");
   }
+}
+
+void PanasonicACWLAN::handle_handshake_packet() {
+  if (this->rx_buffer_[2] == 0x00 && this->rx_buffer_[3] == 0x89) {  // Answer for handshake 2
+    ESP_LOGD(TAG, "Answering handshake [2/16]");
+    send_command(CMD_HANDSHAKE_3, sizeof(CMD_HANDSHAKE_3));
+
+  } else if (this->rx_buffer_[2] == 0x00 && this->rx_buffer_[3] == 0x8C) {  // Answer for handshake 3
+    ESP_LOGD(TAG, "Answering handshake [3/16]");
+    send_command(CMD_HANDSHAKE_4, sizeof(CMD_HANDSHAKE_4));
+
+  } else if (this->rx_buffer_[2] == 0x00 && this->rx_buffer_[3] == 0x90) {  // Answer for handshake 4
+    ESP_LOGD(TAG, "Answering handshake [4/16]");
+    send_command(CMD_HANDSHAKE_5, sizeof(CMD_HANDSHAKE_5));
+
+  } else if (this->rx_buffer_[2] == 0x00 && this->rx_buffer_[3] == 0x91) {  // Answer for handshake 5
+    ESP_LOGD(TAG, "Answering handshake [5/16]");
+    send_command(CMD_HANDSHAKE_6, sizeof(CMD_HANDSHAKE_6));
+
+  } else if (this->rx_buffer_[2] == 0x00 && this->rx_buffer_[3] == 0x92) {  // Answer for handshake 6
+    ESP_LOGD(TAG, "Answering handshake [6/16]");
+    send_command(CMD_HANDSHAKE_7, sizeof(CMD_HANDSHAKE_7));
+
+  } else if (this->rx_buffer_[2] == 0x00 && this->rx_buffer_[3] == 0xC1) {  // Answer for handshake 7
+    ESP_LOGD(TAG, "Answering handshake [7/16]");
+    send_command(CMD_HANDSHAKE_8, sizeof(CMD_HANDSHAKE_8));
+
+  } else if (this->rx_buffer_[2] == 0x01 && this->rx_buffer_[3] == 0xCC) {  // Answer for handshake 8
+    ESP_LOGD(TAG, "Answering handshake [8/16]");
+    send_command(CMD_HANDSHAKE_9, sizeof(CMD_HANDSHAKE_9));
+
+  } else if (this->rx_buffer_[2] == 0x10 && this->rx_buffer_[3] == 0x80) {  // Answer for handshake 9
+    ESP_LOGD(TAG, "Answering handshake [9/16]");
+    send_command(CMD_HANDSHAKE_10, sizeof(CMD_HANDSHAKE_10));
+
+  } else if (this->rx_buffer_[2] == 0x10 && this->rx_buffer_[3] == 0x81) {  // Answer for handshake 10
+    ESP_LOGD(TAG, "Answering handshake [10/16]");
+    send_command(CMD_HANDSHAKE_11, sizeof(CMD_HANDSHAKE_11));
+
+  } else if (this->rx_buffer_[2] == 0x00 && this->rx_buffer_[3] == 0x98) {  // Answer for handshake 11
+    ESP_LOGD(TAG, "Answering handshake [11/16]");
+    send_command(CMD_HANDSHAKE_12, sizeof(CMD_HANDSHAKE_12));
+
+  } else if (this->rx_buffer_[2] == 0x01 && this->rx_buffer_[3] == 0x80) {  // Answer for handshake 12
+    ESP_LOGD(TAG, "Answering handshake [12/16]");
+    send_command(CMD_HANDSHAKE_13, sizeof(CMD_HANDSHAKE_13));
+
+  } else if (this->rx_buffer_[2] == 0x10 && this->rx_buffer_[3] == 0x88) {  // Answer for handshake 13
+    ESP_LOGD(TAG, "Ignoring handshake [13/16]");
+
+  } else if (this->rx_buffer_[2] == 0x01 && this->rx_buffer_[3] == 0x09) {  // First unsolicited packet from AC containing rx counter
+    ESP_LOGD(TAG, "Received rx counter [14/16]");
+    this->receive_packet_count_ = this->rx_buffer_[1];
+    send_command(CMD_HANDSHAKE_14, sizeof(CMD_HANDSHAKE_14), CommandType::Response);
+
+  } else if (this->rx_buffer_[2] == 0x00 && this->rx_buffer_[3] == 0x20) {  // Second unsolicited packet from AC
+    ESP_LOGD(TAG, "Answering handshake [15/16]");
+    this->state_ = ACState::FirstPoll;
+    send_command(CMD_HANDSHAKE_15, sizeof(CMD_HANDSHAKE_15), CommandType::Response);
+
+  } else {
+    ESP_LOGW(TAG, "Received unknown packet during initialization");
+  }
+}
+
+/*
+ * Packet sending
+ */
+
+void PanasonicACWLAN::send_set_command() {
+  // Size of packet is 3 * 4 (for the header, packet size, and key value pair counter)
+  // set_queue_index_ * 4 for the individual key value pairs
+  int packetLength = (3 * 4) + (this->set_queue_index_ * 4);
+  std::vector<uint8_t> packet((size_t) packetLength);
+
+  // Mark this packet as a set command
+  packet[2] = 0x10;
+  packet[3] = 0x08;
+
+  packet[4] = 0x00;
+  packet[5] = (uint8_t) ((4 * this->set_queue_index_) - 1 + 6);
+
+  packet[6] = 0x01;
+  packet[7] = 0x01;
+
+  packet[8]  = 0x30;
+  packet[9]  = 0x01;
+  packet[10] = this->set_queue_index_;
+  packet[11] = 0x00;
+
+  for (int i = 0; i < this->set_queue_index_; i++) {
+    packet[12 + (i * 4) + 0] = this->set_queue_[i][0];
+    packet[12 + (i * 4) + 1] = 0x01;
+    packet[12 + (i * 4) + 2] = this->set_queue_[i][1];
+    packet[12 + (i * 4) + 3] = 0x00;
+  }
+
+  send_packet(packet, CommandType::Normal);
+  this->set_queue_index_ = 0;
+}
+
+void PanasonicACWLAN::send_command(const uint8_t *command, size_t commandLength, CommandType type) {
+  std::vector<uint8_t> packet(commandLength + 3);
+
+  for (size_t i = 0; i < commandLength; i++) {
+    packet[i + 2] = command[i];
+  }
+
+  this->last_command_ = command;
+  this->last_command_length_ = commandLength;
+
+  send_packet(packet, type);
+}
+
+void PanasonicACWLAN::send_packet(std::vector<uint8_t> packet, CommandType type) {
+  uint8_t length = (uint8_t) packet.size();
+
+  uint8_t checksum = 0;
+  packet[0] = HEADER;
+
+  uint8_t packetCount = this->transmit_packet_count_;
+
+  if (type == CommandType::Response)
+    packetCount = this->receive_packet_count_;
+  else if (type == CommandType::Resend)
+    packetCount = (uint8_t) (this->transmit_packet_count_ - 1);
+
+  packet[1] = packetCount;
+
+  for (uint8_t i : packet) {
+    checksum += i;
+  }
+
+  checksum = (uint8_t) (~checksum + 1);
+  packet[length - 1] = checksum;
+
+  this->last_packet_sent_ = millis();
+
+  if (type == CommandType::Normal) {
+    if (this->transmit_packet_count_ == 0xFE)
+      this->transmit_packet_count_ = 0x01;
+    else
+      this->transmit_packet_count_++;
+  } else if (type == CommandType::Response) {
+    if (this->receive_packet_count_ == 0xFE)
+      this->receive_packet_count_ = 0x01;
+    else
+      this->receive_packet_count_++;
+  }
+
+  if (type != CommandType::Response)
+    this->waiting_for_response_ = true;
+
+  write_array(packet);
+  log_packet(packet, true);
+}
+
+/*
+ * Helpers
+ */
+
+void PanasonicACWLAN::handle_resend() {
+  if (this->waiting_for_response_ && millis() - this->last_packet_sent_ > RESPONSE_TIMEOUT && this->rx_buffer_.empty()) {
+    ESP_LOGD(TAG, "Resending previous packet");
+    send_command(this->last_command_, this->last_command_length_, CommandType::Resend);
+  }
+}
+
+void PanasonicACWLAN::set_value(uint8_t key, uint8_t value) {
+  if (this->set_queue_index_ >= 15) {
+    ESP_LOGE(TAG, "Set queue overflow");
+    this->set_queue_index_ = 0;
+    return;
+  }
+
+  this->set_queue_[this->set_queue_index_][0] = key;
+  this->set_queue_[this->set_queue_index_][1] = value;
+  this->set_queue_index_++;
 }
 
 /*
  * Sensor handling
  */
 
-void PanasonicACCNT::on_vertical_swing_change(const std::string &swing) {
+void PanasonicACWLAN::on_vertical_swing_change(const std::string &swing) {
   if (this->state_ != ACState::Ready)
     return;
 
   ESP_LOGD(TAG, "Setting vertical swing position");
 
-  if (this->cmd.empty()) {
-    ESP_LOGV(TAG, "Copying data to cmd");
-    this->cmd = this->data;
-  }
-
   if (swing == "down")
-    this->cmd[4] = (this->cmd[4] & 0x0F) + 0x50;
+    set_value(0xA4, 0x42);
   else if (swing == "down_center")
-    this->cmd[4] = (this->cmd[4] & 0x0F) + 0x40;
+    set_value(0xA4, 0x45);
   else if (swing == "center")
-    this->cmd[4] = (this->cmd[4] & 0x0F) + 0x30;
+    set_value(0xA4, 0x43);
   else if (swing == "up_center")
-    this->cmd[4] = (this->cmd[4] & 0x0F) + 0x20;
+    set_value(0xA4, 0x44);
   else if (swing == "up")
-    this->cmd[4] = (this->cmd[4] & 0x0F) + 0x10;
-  else if (swing == "swing")
-    this->cmd[4] = (this->cmd[4] & 0x0F) + 0xE0;
-  else if (swing == "auto")
-    this->cmd[4] = (this->cmd[4] & 0x0F) + 0xF0;
-  else {
-    ESP_LOGW(TAG, "Unsupported vertical swing position received");
-    return;
-  }
+    set_value(0xA4, 0x41);
+
+  send_set_command();
 }
 
-void PanasonicACCNT::on_horizontal_swing_change(const std::string &swing) {
+void PanasonicACWLAN::on_horizontal_swing_change(const std::string &swing) {
   if (this->state_ != ACState::Ready)
     return;
 
   ESP_LOGD(TAG, "Setting horizontal swing position");
 
-  if (this->cmd.empty()) {
-    ESP_LOGV(TAG, "Copying data to cmd");
-    this->cmd = this->data;
-  }
-
   if (swing == "left")
-    this->cmd[4] = (this->cmd[4] & 0xF0) + 0x09;
+    set_value(0xA5, 0x42);
   else if (swing == "left_center")
-    this->cmd[4] = (this->cmd[4] & 0xF0) + 0x0A;
+    set_value(0xA5, 0x5C);
   else if (swing == "center")
-    this->cmd[4] = (this->cmd[4] & 0xF0) + 0x06;
+    set_value(0xA5, 0x43);
   else if (swing == "right_center")
-    this->cmd[4] = (this->cmd[4] & 0xF0) + 0x0B;
+    set_value(0xA5, 0x56);
   else if (swing == "right")
-    this->cmd[4] = (this->cmd[4] & 0xF0) + 0x0C;
-  else if (swing == "auto")
-    this->cmd[4] = (this->cmd[4] & 0xF0) + 0x0D;
-  else {
-    ESP_LOGW(TAG, "Unsupported horizontal swing position received");
-    return;
-  }
+    set_value(0xA5, 0x41);
+
+  send_set_command();
 }
 
-void PanasonicACCNT::on_nanoex_change(bool state) {
+void PanasonicACWLAN::on_nanoex_change(bool state) {
   if (this->state_ != ACState::Ready)
     return;
-
-  if (this->cmd.empty()) {
-    ESP_LOGV(TAG, "Copying data to cmd");
-    this->cmd = this->data;
-  }
-
-  this->nanoex_state_ = state;
 
   if (state) {
     ESP_LOGV(TAG, "Turning nanoex on");
-    this->cmd[5] = (this->cmd[5] & 0x0F) + 0x40;
+    set_value(0x33, 0x45);
   } else {
     ESP_LOGV(TAG, "Turning nanoex off");
-    this->cmd[5] = (this->cmd[5] & 0x0F);
+    set_value(0x33, 0x42);
   }
+
+  send_set_command();
 }
 
-void PanasonicACCNT::on_eco_change(bool state) {
+void PanasonicACWLAN::on_eco_change(bool state) {
   if (this->state_ != ACState::Ready)
     return;
 
-  if (this->cmd.empty()) {
-    ESP_LOGV(TAG, "Copying data to cmd");
-    this->cmd = this->data;
-  }
+  return;
 
-  this->eco_state_ = state;
-
-  if (state) {
-    ESP_LOGV(TAG, "Turning eco mode on");
-    this->cmd[8] = 0x40;
-  } else {
-    ESP_LOGV(TAG, "Turning eco mode off");
-    this->cmd[8] = 0x00;
-  }
+  // TODO: implement eco
 }
 
-void PanasonicACCNT::on_econavi_change(bool state) {
+void PanasonicACWLAN::on_econavi_change(bool state) {
   if (this->state_ != ACState::Ready)
     return;
 
-  if (this->cmd.empty()) {
-    ESP_LOGV(TAG, "Copying data to cmd");
-    this->cmd = this->data;
-  }
+  return;
 
-  this->econavi_state_ = state;
-
-  if (state) {
-    ESP_LOGV(TAG, "Turning econavi mode on");
-    this->cmd[5] = 0x10;
-  } else {
-    ESP_LOGV(TAG, "Turning econavi mode off");
-    this->cmd[5] = 0x00;
-  }
+  // TODO: implement econavi
 }
 
-void PanasonicACCNT::on_mild_dry_change(bool state) {
+void PanasonicACWLAN::on_mild_dry_change(bool state) {
   if (this->state_ != ACState::Ready)
     return;
 
-  if (this->cmd.empty()) {
-    ESP_LOGV(TAG, "Copying data to cmd");
-    this->cmd = this->data;
-  }
+  return;
 
-  this->mild_dry_state_ = state;
-
-  if (state) {
-    ESP_LOGV(TAG, "Turning mild dry on");
-    this->cmd[2] = 0x7F;
-  } else {
-    ESP_LOGV(TAG, "Turning mild dry off");
-    this->cmd[2] = 0x80;
-  }
+  // TODO: implement mild_dry
 }
 
-}  // namespace CNT
+}  // namespace WLAN
 }  // namespace panasonic_ac
 }  // namespace esphome
