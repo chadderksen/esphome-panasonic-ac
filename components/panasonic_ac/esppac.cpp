@@ -10,10 +10,7 @@ static const char *const TAG = "panasonic_ac";
 climate::ClimateTraits PanasonicAC::traits() {
   auto traits = climate::ClimateTraits();
 
-  traits.add_feature_flags(
-      climate::CLIMATE_SUPPORTS_ACTION |
-      climate::CLIMATE_SUPPORTS_CURRENT_TEMPERATURE
-  );
+  traits.add_feature_flags(climate::CLIMATE_SUPPORTS_ACTION | climate::CLIMATE_SUPPORTS_CURRENT_TEMPERATURE);
 
   traits.set_visual_min_temperature(MIN_TEMPERATURE);
   traits.set_visual_max_temperature(MAX_TEMPERATURE);
@@ -24,8 +21,8 @@ climate::ClimateTraits PanasonicAC::traits() {
 
   traits.set_supported_custom_fan_modes({"Automatic", "1", "2", "3", "4", "5"});
 
-  traits.set_supported_swing_modes({climate::CLIMATE_SWING_OFF, climate::CLIMATE_SWING_BOTH,
-                                    climate::CLIMATE_SWING_VERTICAL, climate::CLIMATE_SWING_HORIZONTAL});
+  traits.set_supported_swing_modes({climate::CLIMATE_SWING_OFF, climate::CLIMATE_SWING_BOTH, climate::CLIMATE_SWING_VERTICAL,
+                                    climate::CLIMATE_SWING_HORIZONTAL});
 
   traits.set_supported_custom_presets({"Normal", "Powerful", "Quiet"});
 
@@ -47,11 +44,6 @@ void PanasonicAC::loop() {
 void PanasonicAC::read_data() {
   while (available())  // Read while data is available
   {
-    // if (this->receive_buffer_index >= BUFFER_SIZE) {
-    //   ESP_LOGE(TAG, "Receive buffer overflow");
-    //   receiveBufferIndex = 0;
-    // }
-
     uint8_t c;
     this->read_byte(&c);  // Store in receive buffer
     this->rx_buffer_.push_back(c);
@@ -70,8 +62,7 @@ void PanasonicAC::update_outside_temperature(int8_t temperature) {
   }
 
   if (this->outside_temperature_sensor_ != nullptr && this->outside_temperature_sensor_->state != temperature) {
-    this->outside_temperature_sensor_->publish_state(
-        temperature);  // Set current (outside) temperature; no temperature steps
+    this->outside_temperature_sensor_->publish_state(temperature);  // Set current (outside) temperature
     ESP_LOGV(TAG, "Outside temperature incl. offset: %d", temperature);
   }
 }
@@ -93,7 +84,7 @@ void PanasonicAC::update_target_temperature(uint8_t raw_value) {
   float temperature = (raw_value * TEMPERATURE_STEP);
   ESP_LOGV(TAG, "Received target temperature %.2f", temperature);
 
-  //Apply offset for displayed value
+  // Apply offset for displayed value
   temperature += this->current_temperature_offset_;
 
   if (temperature > TEMPERATURE_THRESHOLD) {
@@ -108,19 +99,22 @@ void PanasonicAC::update_target_temperature(uint8_t raw_value) {
 void PanasonicAC::update_swing_horizontal(const std::string &swing) {
   this->horizontal_swing_state_ = swing;
 
-  if (this->horizontal_swing_select_ != nullptr &&
-      this->horizontal_swing_state_.compare(this->horizontal_swing_select_->current_option())) {
-    this->horizontal_swing_select_->publish_state(
-        this->horizontal_swing_state_);  // Set current horizontal swing position
+  if (this->horizontal_swing_select_ != nullptr) {
+    const char *cur = this->horizontal_swing_select_->current_option().c_str();
+    if (cur == nullptr || this->horizontal_swing_state_ != std::string(cur)) {
+      this->horizontal_swing_select_->publish_state(this->horizontal_swing_state_);
+    }
   }
 }
 
 void PanasonicAC::update_swing_vertical(const std::string &swing) {
   this->vertical_swing_state_ = swing;
 
-  if (this->vertical_swing_select_ != nullptr &&
-      this->vertical_swing_state_.compare(this->vertical_swing_select_->current_option())) {
-    this->vertical_swing_select_->publish_state(this->vertical_swing_state_);  // Set current vertical swing position
+  if (this->vertical_swing_select_ != nullptr) {
+    const char *cur = this->vertical_swing_select_->current_option().c_str();
+    if (cur == nullptr || this->vertical_swing_state_ != std::string(cur)) {
+      this->vertical_swing_select_->publish_state(this->vertical_swing_state_);
+    }
   }
 }
 
@@ -172,8 +166,7 @@ climate::ClimateAction PanasonicAC::determine_action() {
 
 void PanasonicAC::update_current_power_consumption(int16_t power) {
   if (this->current_power_consumption_sensor_ != nullptr && this->current_power_consumption_sensor_->state != power) {
-    this->current_power_consumption_sensor_->publish_state(
-        power);  // Set current power consumption
+    this->current_power_consumption_sensor_->publish_state(power);
   }
 }
 
@@ -190,44 +183,61 @@ void PanasonicAC::set_outside_temperature_offset(int8_t outside_temperature_offs
   this->outside_temperature_offset_ = outside_temperature_offset;
 
   if (this->outside_temperature_sensor_) {
-    ESP_LOGV(TAG, "Corrected outside temperature: %d", this->outside_temperature_sensor_->state + outside_temperature_offset);
+    ESP_LOGV(TAG, "Corrected outside temperature: %d",
+             (int) (this->outside_temperature_sensor_->state + outside_temperature_offset));
   }
 }
 
-void PanasonicAC::set_current_temperature_offset(int8_t current_temperature_offset)
-{
+void PanasonicAC::set_current_temperature_offset(int8_t current_temperature_offset) {
   ESP_LOGV(TAG, "Current temperature offset %d", current_temperature_offset);
   this->current_temperature_offset_ = current_temperature_offset;
 
   if (this->current_temperature_sensor_) {
-    ESP_LOGV(TAG, "Corrected current temperature: %d", this->current_temperature_sensor_->state + current_temperature_offset);
+    ESP_LOGV(TAG, "Corrected current temperature: %d",
+             (int) (this->current_temperature_sensor_->state + current_temperature_offset));
   }
 }
 
-void PanasonicAC::set_current_temperature_sensor(sensor::Sensor *current_temperature_sensor)
-{
+void PanasonicAC::set_current_temperature_sensor(sensor::Sensor *current_temperature_sensor) {
   this->current_temperature_sensor_ = current_temperature_sensor;
-  this->current_temperature_sensor_->add_on_state_callback([this](float state)
-                                                           {
-                                                             this->current_temperature = state + this->current_temperature_offset_;
-                                                             this->publish_state();
-                                                           });
+  this->current_temperature_sensor_->add_on_state_callback([this](float state) {
+    this->current_temperature = state + this->current_temperature_offset_;
+    this->publish_state();
+  });
 }
 
 void PanasonicAC::set_vertical_swing_select(select::Select *vertical_swing_select) {
   this->vertical_swing_select_ = vertical_swing_select;
-  this->vertical_swing_select_->add_on_state_callback([this](const std::string &value, size_t index) {
+
+  // ESPHome 2026.1+: Select::add_on_state_callback takes only the selected index (size_t)
+  this->vertical_swing_select_->add_on_state_callback([this](size_t index) {
+    if (this->vertical_swing_select_ == nullptr)
+      return;
+    if (!this->vertical_swing_select_->has_index(index))
+      return;
+
+    std::string value = this->vertical_swing_select_->option_at(index);
     if (value == this->vertical_swing_state_)
       return;
+
     this->on_vertical_swing_change(value);
   });
 }
 
 void PanasonicAC::set_horizontal_swing_select(select::Select *horizontal_swing_select) {
   this->horizontal_swing_select_ = horizontal_swing_select;
-  this->horizontal_swing_select_->add_on_state_callback([this](const std::string &value, size_t index) {
+
+  // ESPHome 2026.1+: Select::add_on_state_callback takes only the selected index (size_t)
+  this->horizontal_swing_select_->add_on_state_callback([this](size_t index) {
+    if (this->horizontal_swing_select_ == nullptr)
+      return;
+    if (!this->horizontal_swing_select_->has_index(index))
+      return;
+
+    std::string value = this->horizontal_swing_select_->option_at(index);
     if (value == this->horizontal_swing_state_)
       return;
+
     this->on_horizontal_swing_change(value);
   });
 }
